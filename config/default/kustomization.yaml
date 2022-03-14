@@ -1,0 +1,13 @@
+bases:
+# install cert manager.
+# change version in the link in folder
+- ../cert-manager
+
+# installs storage based on host-path on node.
+# please change path in configmap and node selector in
+# deployment manifests
+- ../local-path-provisioner
+
+# install nfs on top of local storage to be able
+# to provision volumes on any node
+- ../nfs

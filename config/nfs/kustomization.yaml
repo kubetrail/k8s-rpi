@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Adds namespace to all resources.
+namespace: nfs-system
+
+# this is the image name from upstream, which gets
+# replaced per make target deploy-manifests
+images:
+- name: k8s.gcr.io/sig-storage/nfs-provisioner
+  newName: k8s.gcr.io/sig-storage/nfs-provisioner
+  newTag: v3.0.0
+
+resources:
+- staefulset.yaml
+- class.yaml
+- rbac.yaml
+- pvc.yaml
+- namespace.yaml
