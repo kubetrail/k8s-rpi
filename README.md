@@ -8,7 +8,7 @@ storage layer for dynamic provisioning of volumes.
 > particular purpose whether for production use case or personal home automation
 > use cases. Please review the code and use at your own risk.
 
-### hardware
+## hardware
 * Raspberry PI 4 with 8GB memory (3 nodes)
 * An external USB3 drive for `etcd` data store and persistent volume storage
 
@@ -26,7 +26,7 @@ Once the nodes are up run `sudo rapi-config` command to:
 
 Reboot nodes.
 
-Install `cgroups`
+Install `cgroups` on all nodes
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 sudo apt-get install -y cgroups*
@@ -42,7 +42,7 @@ assume `worker` roles
 
 Reboot nodes.
 
-## control-plane node setup
+## control-plane node setup on rpi4-0
 Install `k0s` and `kubectl`:
 ```bash
 curl -sSLf https://get.k0s.sh | sudo sh
@@ -61,7 +61,16 @@ source <(kubectl completion bash)
 This node will also work as `storage` node, so attach external drive and format
 it with `ext4` file system. Auto-mount external storage by configuring `/etc/fstab` file:
 
-The file may look something as follows:
+There may be prep steps for the attached block device such as formatting and wiping off
+existing filesystems. Here are some commands to try to clean up and format the device
+before use:
+```bash
+sudo mkfs.ext4 /dev/sda
+sudo wipefs -a /dev/sda
+sudo sgdisk --zap-all /dev/sda
+```
+
+The `/etc/fstab` may look something as follows:
 ```bash
 cat /etc/fstab 
 proc            /proc           proc    defaults          0       0
@@ -107,10 +116,11 @@ sudo cp default-config.yaml /etc/k0s/
 rm -rf default-config.yaml
 ```
 
-Now reboot the node and then install `k0s` controller in a single mode
+Now reboot the node and then install `k0s` controller
 ```bash
 sudo k0s install controller \
-    --single \
+    --enable-worker \
+    --no-taints \
     --config=/etc/k0s/default-config.yaml \
     --data-dir=/mnt/k8s/k0s
 ```
@@ -133,23 +143,23 @@ Environment=ETCD_UNSUPPORTED_ARCH=arm64
 ExecStart=/usr/local/bin/k0s controller --config=/etc/k0s/default-config.yaml --data-dir=/mnt/k8s/k0s --single=true
 ```
 
-Start the service
+Start the service and check status
 ```bash
 sudo systemctl daemon-reload
 sudo k0s start
+sudo k0s status
 ```
 
 wait a bit and then ensure that the status is ok
-```bash
-sudo k0s status
-Version: v1.23.3+k0s.0
-Process ID: 656
+```text
+Version: v1.24.4+k0s.0
+Process ID: 883
 Role: controller
 Workloads: true
-SingleNode: true
+SingleNode: false
 ```
 
-### Generate kubeconfig and connect
+### generate kubeconfig and connect
 ```bash
 mkdir -p ${HOME}/.kube
 sudo k0s kubeconfig create \
@@ -169,8 +179,8 @@ by giving permissions via cluster role binding. Also label nodes that
 will act as storage node. This is the node where external drive is
 attached and mounted.
 ```bash
-kubectl create clusterrolebinding user-crb --clusterrole=cluster-admin --user=user@example.com
 kubectl label nodes rpi4-0 kubernetes.io/storage=storage
+kubectl create clusterrolebinding user-crb --clusterrole=cluster-admin --user=user@example.com
 ```
 
 ### access cluster externally
@@ -208,38 +218,26 @@ users:
 At this point the cluster can be accessed externally:
 ```bash
 kubectl get nodes -o wide
+```
+```text
 NAME     STATUS   ROLES                  AGE   VERSION       INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION   CONTAINER-RUNTIME
 rpi4-0   Ready    control-plane          9h    v1.23.3+k0s   ***.***.*.**   <none>        Debian GNU/Linux 11 (bullseye)   5.10.103-v8+     containerd://1.5.9
 ```
 
-## worker nodes setup
-Install `cgroups`
-```bash
-sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install -y cgroups*
-```
-
-Add following text to `/boot/cmdline.txt` on all nodes
-```
-cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1
-```
-
-Install `k0s` and `kubectl`:
-```bash
-curl -sSLf https://get.k0s.sh | sudo sh
-```
-
-Reboot nodes.
-
-### join workers
-First, create join token at the control-plane node
+Finally, create a join token to allow worker nodes to join the cluster
 ```bash
 sudo k0s token create \
     --data-dir=/mnt/k8s/k0s \
     --role worker > join-token
 ```
 
-Copy the `join-token` to all worker nodes, then do
+Copy the `join-token` on all worker nodes
+
+## worker node setup
+Do these steps on all worker nodes
+
+### join workers
+Assuming `join-token` exists on all worker nodes, do
 ```bash
 sudo mkdir -p /var/lib/k0s/
 sudo cp join-token /var/lib/k0s/
@@ -260,6 +258,8 @@ kubectl label nodes rpi4-1 kubernetes.io/sgp30=sensor
 At this point the 3-node cluster should be ready.
 ```bash
 kubectl get nodes -o wide
+```
+```text
 NAME     STATUS   ROLES                  AGE   VERSION       INTERNAL-IP    EXTERNAL-IP   OS-IMAGE                         KERNEL-VERSION   CONTAINER-RUNTIME
 rpi4-0   Ready    control-plane          9h    v1.23.3+k0s   ***.***.*.**   <none>        Debian GNU/Linux 11 (bullseye)   5.10.103-v8+     containerd://1.5.9
 rpi4-1   Ready    worker                 58m   v1.23.3+k0s   ***.***.*.**   <none>        Debian GNU/Linux 11 (bullseye)   5.10.103-v8+     containerd://1.5.9
@@ -269,6 +269,8 @@ rpi4-2   Ready    worker                 58m   v1.23.3+k0s   ***.***.*.**   <non
 At this point following pods should be up and running on the cluster
 ```bash
 kubectl get pods --all-namespaces
+```
+```text
 NAMESPACE     NAME                              READY   STATUS    RESTARTS       AGE
 kube-system   coredns-6d9f49dcbb-8cd95          1/1     Running   0              11h
 kube-system   coredns-6d9f49dcbb-fv78d          1/1     Running   0              153m
@@ -307,7 +309,7 @@ Once image is available on your repo, you can build manifests.
 Alternatively, if you did not build and push your own image, the default
 image will be used.
 ```bash
-make manifests
+make deploy-manifests
 ```
 
 This will now produce deployable manifests in `config/samples/manifests.yaml`,
