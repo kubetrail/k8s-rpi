@@ -188,6 +188,11 @@ In order to access cluster externally copy the `kubeconfig` file and make change
 to allow `gcloud` CLI work as an auth provider. An example `kubeconfig` is shown below with cert authority
 data redacted. Make sure cert authority data is populated per your control plane node `kubeconfig` file.
 
+This way a user sends their OIDC compatible ID token to the API server and such token is being
+generated using `gcloud`. However, `gcloud` output needs to be reformatted to comply with the
+requirements of the `ExecCredential` format. This can be easily done by wrapping `gcloud`
+in a shell script `rpi-gcloud-auth-plugin.sh`.
+
 ```yaml
 kind: Config
 apiVersion: v1
@@ -206,13 +211,12 @@ preferences: {}
 users:
 - name: k0s
   user:
-    auth-provider:
-      config:
-        cmd-args: config config-helper --format=json
-        cmd-path: gcloud
-        expiry-key: '{.credential.token_expiry}'
-        token-key: '{.credential.id_token}'
-      name: gcp
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: rpi-gcloud-auth-plugin.sh
+      installHint: Install gke-gcloud-auth-plugin for use with kubectl by following
+        https://cloud.google.com/blog/products/containers-kubernetes/kubectl-auth-changes-in-gke
+      provideClusterInfo: true
 ```
 
 At this point the cluster can be accessed externally:
